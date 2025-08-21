@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Question struct {
@@ -17,9 +18,10 @@ type Question struct {
 }
 
 type Quiz struct {
-	Questions []Question
-	Correct   int
-	Incorrect int
+	Questions   []Question
+	Correct     int
+	Incorrect   int
+	NotAnswered int
 }
 
 func main() {
@@ -31,9 +33,11 @@ func main() {
 
 func run() error {
 	filenamePtr := flag.String("file", "problems.csv", "the quiz csv file")
+	timeLimitPtr := flag.Int("limit", 30, "the time limit in seconds for the quiz")
 	flag.Parse()
 
 	filename := *filenamePtr
+	timeLimit := *timeLimitPtr
 
 	file, err := os.Open(filename)
 	if err != nil {
@@ -80,26 +84,46 @@ func run() error {
 	fmt.Println("Press any key to start the quiz.")
 	_, _ = ioReader.ReadString('\n')
 
-	for i, question := range quiz.Questions {
-		fmt.Printf("%d) %s\n", i+1, question.Prompt)
+	startTime := time.Now()
+	timer := time.NewTimer(time.Duration(timeLimit) * time.Second)
 
-		answer, _ := ioReader.ReadString('\n')
-		answer = strings.Replace(answer, "\n", "", -1)
-		answer = strings.TrimSpace(answer)
+	done := make(chan bool, 1)
 
-		expected := question.Answer
-		expected = strings.TrimSpace(expected)
+	go func() {
+		for i, question := range quiz.Questions {
+			fmt.Printf("%d) %s\n", i+1, question.Prompt)
 
-		if answer == expected {
-			quiz.Correct++
-		} else {
-			quiz.Incorrect++
+			answer, _ := ioReader.ReadString('\n')
+			answer = strings.Replace(answer, "\n", "", -1)
+			answer = strings.TrimSpace(answer)
+
+			expected := question.Answer
+			expected = strings.TrimSpace(expected)
+
+			if answer == expected {
+				quiz.Correct++
+			} else {
+				quiz.Incorrect++
+			}
 		}
+		done <- true
+	}()
+
+	// wait for the quiz to finish or the time to expire
+	select {
+	case <-timer.C:
+		fmt.Println("Time limit exceeded!")
+		quiz.NotAnswered = len(quiz.Questions) - (quiz.Correct + quiz.Incorrect)
+	case <-done:
+		fmt.Println("Quiz finished!")
 	}
 
-	fmt.Println("You have completed the quiz!")
+	fmt.Println("Total Questions: ", len(quiz.Questions))
 	fmt.Printf("Correct: %d\n", quiz.Correct)
 	fmt.Printf("Incorrect: %d\n", quiz.Incorrect)
+	fmt.Printf("Not Answered: %d\n", quiz.NotAnswered)
+	fmt.Printf("Time elapsed: %.2f seconds \n", time.Since(startTime).Seconds())
+	fmt.Printf("Score: %.2f\n", (float64(quiz.Correct)/float64(len(quiz.Questions)))*100)
 
 	return nil
 }
